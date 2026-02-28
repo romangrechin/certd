@@ -1,0 +1,162 @@
+name: Release
+
+# Trigger only on version tags: v1.0.0, v1.2.3-beta, etc.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write   # required to create a GitHub Release and upload assets
+
+jobs:
+  build-and-release:
+    name: Build & Release
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          # Linux — the primary target platform for a server daemon
+          - goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+
+          - goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+
+          - goos: linux
+            goarch: "386"
+            suffix: linux-386
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so `git describe` works correctly
+
+      # -----------------------------------------------------------------------
+      # 2. Set up Go
+      # -----------------------------------------------------------------------
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod   # respects the `go` directive in go.mod
+          cache: true
+
+      # -----------------------------------------------------------------------
+      # 3. Derive version and artifact name from the tag
+      #
+      #    TAG  : raw tag value, e.g. v1.2.3
+      #    VER  : tag without leading 'v', e.g. 1.2.3
+      #    NAME : archive base name, e.g. certd-1.2.3-linux-amd64
+      # -----------------------------------------------------------------------
+      - name: Set version variables
+        id: vars
+        run: |
+          TAG="${{ github.ref_name }}"
+          VER="${TAG#v}"
+          NAME="certd-${VER}-${{ matrix.suffix }}"
+          echo "tag=${TAG}"   >> "$GITHUB_OUTPUT"
+          echo "ver=${VER}"   >> "$GITHUB_OUTPUT"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # 4. Download dependencies
+      # -----------------------------------------------------------------------
+      - name: Download Go modules
+        run: go mod download
+
+      # -----------------------------------------------------------------------
+      # 5. Build a static binary
+      #
+      #    CGO_ENABLED=0  — fully static, no libc dependency
+      #    -trimpath      — strip local build paths from the binary
+      #    -s -w          — strip debug info and DWARF tables (smaller binary)
+      #    -X main.version — embed the version string at compile time
+      # -----------------------------------------------------------------------
+      - name: Build binary
+        env:
+          GOOS:   ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.Version=${{ steps.vars.outputs.ver }}" \
+            -o certd \
+            ./cmd/certd
+
+      # -----------------------------------------------------------------------
+      # 6. Create LICENSE.txt if it does not exist in the repository.
+      #    Remove this step once you commit a real LICENSE file.
+      # -----------------------------------------------------------------------
+      - name: Ensure LICENSE.txt exists
+        run: |
+          if [ ! -f LICENSE.txt ]; then
+            echo "MIT License — see https://opensource.org/licenses/MIT" > LICENSE.txt
+          fi
+
+      # -----------------------------------------------------------------------
+      # 7. Assemble the release archive
+      #
+      #    Archive layout:
+      #      certd-<ver>-<platform>/
+      #        certd                  <- binary
+      #        README.md
+      #        certd.service
+      #        config.example.yaml
+      #        LICENSE.txt
+      # -----------------------------------------------------------------------
+      - name: Create release archive
+        run: |
+          NAME="${{ steps.vars.outputs.name }}"
+          mkdir -p "dist/${NAME}"
+          cp certd              "dist/${NAME}/"
+          cp README.md          "dist/${NAME}/"
+          cp certd.service      "dist/${NAME}/"
+          cp config.example.yaml "dist/${NAME}/"
+          cp LICENSE.txt        "dist/${NAME}/"
+          cd dist
+          tar -czf "${NAME}.tar.gz" "${NAME}/"
+          sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+          echo "archive=dist/${NAME}.tar.gz"        >> "$GITHUB_OUTPUT"
+          echo "checksum=dist/${NAME}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+        id: archive
+
+      # -----------------------------------------------------------------------
+      # 8. Upload the archive as a workflow artifact (optional — useful for
+      #    inspecting builds on non-tag runs or debugging).
+      # -----------------------------------------------------------------------
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.vars.outputs.name }}
+          path: |
+            ${{ steps.archive.outputs.archive }}
+            ${{ steps.archive.outputs.checksum }}
+          retention-days: 7
+
+      # -----------------------------------------------------------------------
+      # 9. Publish a GitHub Release and attach the archive + checksum.
+      #
+      #    The release is created (or updated) once per tag. When multiple
+      #    matrix jobs finish at different times the action handles the race
+      #    gracefully because `softprops/action-gh-release` is idempotent.
+      # -----------------------------------------------------------------------
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name:   ${{ steps.vars.outputs.tag }}
+          name:       "certd ${{ steps.vars.outputs.ver }}"
+          draft:      false
+          prerelease: ${{ contains(steps.vars.outputs.tag, '-') }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.archive.outputs.archive }}
+            ${{ steps.archive.outputs.checksum }}
+
