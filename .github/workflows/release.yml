@@ -5,6 +5,7 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
 
 permissions:
   contents: write   # required to create a GitHub Release and upload assets
