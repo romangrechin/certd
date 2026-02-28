@@ -50,7 +50,7 @@ account with one configuration file.
 
 ### 1. Prerequisites
 
-- Go 1.21 or later
+- Go 1.24 or later
 - Port **80** accessible from the internet on every domain you want to manage
   (required for HTTP-01 challenge)
 
