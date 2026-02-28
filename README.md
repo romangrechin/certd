@@ -95,7 +95,6 @@ sudo journalctl -u certd -f
 acme:
   email: "admin@example.com"
   staging: false               # set true to test without rate limits
-  http_addr: ":80"
   check_interval: "12h"
   account_storage_dir: "/var/lib/certd"
 
@@ -106,8 +105,7 @@ domains:
     ca_file:   "/etc/ipsec.d/cacerts/vpn.ca.pem"
     key_file:  "/etc/ipsec.d/private/vpn.key.pem"
     post_renew_hook: |
-      ipsec rereadcacerts
-      ipsec rereadsecrets
+      ipsec rereadall
       ipsec reload
 
   - domain: "www.example.com"
