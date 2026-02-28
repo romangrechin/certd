@@ -1,0 +1,24 @@
+[Unit]
+Description=certd — Universal Let's Encrypt certificate daemon
+Documentation=https://github.com/romangrechin/certd
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/certd --config /etc/certd/config.yaml
+Restart=on-failure
+RestartSec=30s
+
+User=root
+Group=root
+
+# Allow writes to certificate directories and the account store.
+ReadWritePaths=/var/lib/certd
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=certd
+
+[Install]
+WantedBy=multi-user.target
